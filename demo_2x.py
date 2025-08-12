@@ -9,7 +9,7 @@ import time
 
 
 model = Model().cuda().eval()
-model.load_state_dict(torch.load('./checkpoint/IFRNet_S/2025-08-12_16-09-07/IFRNet_S_best.pth'))
+# model.load_state_dict(torch.load('./checkpoint/IFRNet_S/2025-08-12_16-09-07/IFRNet_S_best.pth'))
 
 # model.load_state_dict(torch.load('./checkpoints/IFRNet_small/IFRNet_S_Vimeo90k.pth'))
 
