@@ -8,9 +8,14 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
-import torch.distributed as dist
-from torch.utils.data.distributed import DistributedSampler
-from torch.nn.parallel import DistributedDataParallel as DDP
+from tqdm import tqdm
+from torchvision import models
+from torchinfo import summary
+
+
+# import torch.distributed as dist
+# from torch.utils.data.distributed import DistributedSampler
+# from torch.nn.parallel import DistributedDataParallel as DDP
 from datasets import Vimeo90K_Train_Dataset, Vimeo90K_Test_Dataset
 from metric import calculate_psnr, calculate_ssim
 from utils import AverageMeter
@@ -28,13 +33,15 @@ def set_lr(optimizer, lr):
         param_group['lr'] = lr
 
 
-def train(args, ddp_model):
+def train(args, model):
     local_rank = args.local_rank
     print('Distributed Data Parallel Training IFRNet on Rank {}'.format(local_rank))
 
     if local_rank == 0:
         os.makedirs(args.log_path, exist_ok=True)
-        log_path = os.path.join(args.log_path, time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()))
+        safe_time = time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime())
+        log_path = os.path.join(args.log_path, safe_time)
+        # log_path = os.path.join(args.log_path, time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()))
         os.makedirs(log_path, exist_ok=True)
         logger = logging.getLogger()
         logger.setLevel('INFO')
@@ -50,16 +57,16 @@ def train(args, ddp_model):
         logger.addHandler(fhlr)
         logger.info(args)
 
-    dataset_train = Vimeo90K_Train_Dataset(dataset_dir='/home/ltkong/Datasets/Vimeo90K/vimeo_triplet', augment=True)
-    sampler = DistributedSampler(dataset_train)
-    dataloader_train = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.num_workers, pin_memory=True, drop_last=True, sampler=sampler)
+    dataset_train = Vimeo90K_Train_Dataset(dataset_dir= "C:\\Users\\enric\\Monash\\Y3S2\\model\\vimeo90k-test-and-train\\vimeo_triplet", augment=True)
+
+    dataloader_train = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.num_workers, pin_memory=True, drop_last=True)
     args.iters_per_epoch = dataloader_train.__len__()
     iters = args.resume_epoch * args.iters_per_epoch
     
-    dataset_val = Vimeo90K_Test_Dataset(dataset_dir='/home/ltkong/Datasets/Vimeo90K/vimeo_triplet')
+    dataset_val = Vimeo90K_Test_Dataset(dataset_dir= "C:\\Users\\enric\\Monash\\Y3S2\\model\\vimeo90k-test-and-train\\vimeo_triplet")
     dataloader_val = DataLoader(dataset_val, batch_size=16, num_workers=16, pin_memory=True, shuffle=False, drop_last=True)
 
-    optimizer = optim.AdamW(ddp_model.parameters(), lr=args.lr_start, weight_decay=0)
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr_start, weight_decay=0)
 
     time_stamp = time.time()
     avg_rec = AverageMeter()
@@ -68,8 +75,10 @@ def train(args, ddp_model):
     best_psnr = 0.0
 
     for epoch in range(args.resume_epoch, args.epochs):
-        sampler.set_epoch(epoch)
-        for i, data in enumerate(dataloader_train):
+        # sampler.set_epoch(epoch)
+        data_iter = tqdm(enumerate(dataloader_train), total=len(dataloader_train), desc=f"Epoch {epoch+1}/{args.epochs}")
+        
+        for i, data in data_iter:
             for l in range(len(data)):
                 data[l] = data[l].to(args.device)
             img0, imgt, img1, flow, embt = data
@@ -82,7 +91,7 @@ def train(args, ddp_model):
 
             optimizer.zero_grad()
 
-            imgt_pred, loss_rec, loss_geo, loss_dis = ddp_model(img0, img1, embt, imgt, flow)
+            imgt_pred, loss_rec, loss_geo, loss_dis = model(img0, img1, embt, imgt, flow)
 
             loss = loss_rec + loss_geo + loss_dis
             loss.backward()
@@ -98,21 +107,22 @@ def train(args, ddp_model):
                 avg_rec.reset()
                 avg_geo.reset()
                 avg_dis.reset()
+                
 
             iters += 1
             time_stamp = time.time()
 
         if (epoch+1) % args.eval_interval == 0 and local_rank == 0:
-            psnr = evaluate(args, ddp_model, dataloader_val, epoch, logger)
+            psnr = evaluate(args, model, dataloader_val, epoch, logger)
             if psnr > best_psnr:
                 best_psnr = psnr
-                torch.save(ddp_model.module.state_dict(), '{}/{}_{}.pth'.format(log_path, args.model_name, 'best'))
-            torch.save(ddp_model.module.state_dict(), '{}/{}_{}.pth'.format(log_path, args.model_name, 'latest'))
+                torch.save(model.state_dict(), '{}/{}_{}.pth'.format(log_path, args.model_name, 'best'))
+            torch.save(model.state_dict(), '{}/{}_{}.pth'.format(log_path, args.model_name, 'latest'))
 
-        dist.barrier()
+        # dist.barrier()
 
 
-def evaluate(args, ddp_model, dataloader_val, epoch, logger):
+def evaluate(args, model, dataloader_val, epoch, logger):
     loss_rec_list = []
     loss_geo_list = []
     loss_dis_list = []
@@ -124,7 +134,7 @@ def evaluate(args, ddp_model, dataloader_val, epoch, logger):
         img0, imgt, img1, flow, embt = data
 
         with torch.no_grad():
-            imgt_pred, loss_rec, loss_geo, loss_dis = ddp_model(img0, img1, embt, imgt, flow)
+            imgt_pred, loss_rec, loss_geo, loss_dis = model(img0, img1, embt, imgt, flow)
 
         loss_rec_list.append(loss_rec.cpu().numpy())
         loss_geo_list.append(loss_geo.cpu().numpy())
@@ -156,9 +166,9 @@ if __name__ == '__main__':
     parser.add_argument('--resume_path', default=None, type=str)
     args = parser.parse_args()
 
-    dist.init_process_group(backend='nccl', world_size=args.world_size)
-    torch.cuda.set_device(args.local_rank)
-    args.device = torch.device('cuda', args.local_rank)
+    # dist.init_process_group(backend='nccl', world_size=args.world_size)
+    # torch.cuda.set_device(args.local_rank)
+    args.device = torch.device('cuda')
 
     seed = 1234
     random.seed(seed)
@@ -181,9 +191,11 @@ if __name__ == '__main__':
     
     if args.resume_epoch != 0:
         model.load_state_dict(torch.load(args.resume_path, map_location='cpu'))
-        
-    ddp_model = DDP(model, device_ids=[args.local_rank], output_device=args.local_rank)
+
+
+
+    train(args, model)
+
+
     
-    train(args, ddp_model)
-    
-    dist.destroy_process_group()
+    # dist.destroy_process_group()

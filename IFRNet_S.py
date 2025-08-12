@@ -14,8 +14,6 @@ def resize(x, scale_factor):
 
 
 
-
-
 def convrelu(in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, bias=True):
     return nn.Sequential(
         # Depthwise convolution
@@ -33,58 +31,6 @@ def depthwise_separable_conv(channels, bias = True):
         nn.Conv2d(channels,channels, kernel_size = 1, stride = 1, padding = 0, bias = bias),
         nn.PReLU(channels)
     )
-
-
-# class ResBlock(nn.Module):
-#     def __init__(self, in_channels, side_channels, bias=True, bottleneck_ratio=0.5):
-#         super(ResBlock, self).__init__()
-#         self.side_channels = side_channels
-
-
-#         self.conv1 = depthwise_separable_conv(in_channels, bias)
-
-#         # self.conv1 = nn.Sequential(
-#         #     nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=bias), 
-#         #     nn.PReLU(in_channels)
-#         # )
-
-#         self.conv2 = depthwise_separable_conv(side_channels, bias)
-
-#         # self.conv2 = nn.Sequential(
-#         #     nn.Conv2d(side_channels, side_channels, kernel_size=3, stride=1, padding=1, bias=bias), 
-#         #     nn.PReLU(side_channels)
-#         # )
-
-#         self.conv3 = depthwise_separable_conv(in_channels, bias)
-
-
-#         # self.conv3 = nn.Sequential(
-#         #     nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=bias), 
-#         #     nn.PReLU(in_channels)
-#         # )
-
-#         self.conv4 = depthwise_separable_conv(side_channels, bias)
-
-#         # self.conv4 = nn.Sequential(
-#         #     nn.Conv2d(side_channels, side_channels, kernel_size=3, stride=1, padding=1, bias=bias), 
-#         #     nn.PReLU(side_channels)
-#         # )
-
-#         self.conv5 =  nn.Sequential ( 
-#             nn.Conv2d(in_channels, in_channels, kernel_size = 3, stride = 1, padding = 1, groups = in_channels, bias = bias ),
-#             nn.Conv2d(in_channels,in_channels, kernel_size = 1, stride = 1, padding = 0, bias = bias)
-#             )
-
-#         # self.conv5 = nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=bias)
-#         self.prelu = nn.PReLU(in_channels)
-
-#     def forward(self, x):
-#         out = self.conv1(x)
-#         out[:, -self.side_channels:, :, :] = self.conv2(out[:, -self.side_channels:, :, :].clone())
-#         out = self.conv3(out)
-#         out[:, -self.side_channels:, :, :] = self.conv4(out[:, -self.side_channels:, :, :].clone())
-#         out = self.prelu(x + self.conv5(out))
-#         return out
 
 
 
@@ -236,6 +182,52 @@ class Model(nn.Module):
         self.rb_loss = Charbonnier_Ada()
         self.gc_loss = Geometry(3)
 
+
+    def inference(self, img0, img1, embt, scale_factor=1.0):
+        mean_ = torch.cat([img0, img1], 2).mean(1, keepdim=True).mean(2, keepdim=True).mean(3, keepdim=True)
+        img0 = img0 - mean_
+        img1 = img1 - mean_
+
+        img0_ = resize(img0, scale_factor=scale_factor)
+        img1_ = resize(img1, scale_factor=scale_factor)
+
+        f0_1, f0_2, f0_3, f0_4 = self.encoder(img0_)
+        f1_1, f1_2, f1_3, f1_4 = self.encoder(img1_)
+
+        out4 = self.decoder4(f0_4, f1_4, embt)
+        up_flow0_4 = out4[:, 0:2]
+        up_flow1_4 = out4[:, 2:4]
+        ft_3_ = out4[:, 4:]
+
+        out3 = self.decoder3(ft_3_, f0_3, f1_3, up_flow0_4, up_flow1_4)
+        up_flow0_3 = out3[:, 0:2] + 2.0 * resize(up_flow0_4, scale_factor=2.0)
+        up_flow1_3 = out3[:, 2:4] + 2.0 * resize(up_flow1_4, scale_factor=2.0)
+        ft_2_ = out3[:, 4:]
+
+        out2 = self.decoder2(ft_2_, f0_2, f1_2, up_flow0_3, up_flow1_3)
+        up_flow0_2 = out2[:, 0:2] + 2.0 * resize(up_flow0_3, scale_factor=2.0)
+        up_flow1_2 = out2[:, 2:4] + 2.0 * resize(up_flow1_3, scale_factor=2.0)
+        ft_1_ = out2[:, 4:]
+
+        out1 = self.decoder1(ft_1_, f0_1, f1_1, up_flow0_2, up_flow1_2)
+        up_flow0_1 = out1[:, 0:2] + 2.0 * resize(up_flow0_2, scale_factor=2.0)
+        up_flow1_1 = out1[:, 2:4] + 2.0 * resize(up_flow1_2, scale_factor=2.0)
+        up_mask_1 = torch.sigmoid(out1[:, 4:5])
+        up_res_1 = out1[:, 5:]
+
+        up_flow0_1 = resize(up_flow0_1, scale_factor=(1.0/scale_factor)) * (1.0/scale_factor)
+        up_flow1_1 = resize(up_flow1_1, scale_factor=(1.0/scale_factor)) * (1.0/scale_factor)
+        up_mask_1 = resize(up_mask_1, scale_factor=(1.0/scale_factor))
+        up_res_1 = resize(up_res_1, scale_factor=(1.0/scale_factor))
+
+        img0_warp = warp(img0, up_flow0_1)
+        img1_warp = warp(img1, up_flow1_1)
+        imgt_merge = up_mask_1 * img0_warp + (1 - up_mask_1) * img1_warp + mean_
+        imgt_pred = imgt_merge + up_res_1
+        imgt_pred = torch.clamp(imgt_pred, 0, 1)
+        return imgt_pred
+
+
     def forward(self, img0, img1, embt, imgt, flow=None):
         mean_ = torch.cat([img0, img1], 2).mean(1, keepdim=True).mean(2, keepdim=True).mean(3, keepdim=True)
         img0 = img0 - mean_
@@ -286,53 +278,25 @@ class Model(nn.Module):
 
         return imgt_pred, loss_rec, loss_geo, loss_dis
 
+if __name__ == '__main__':
+    device = torch.device('cuda')
+
+    model = ResBlock(144, 24).to(device)
 
 
-    def inference(self, img0, img1, embt, scale_factor=1.0):
-        mean_ = torch.cat([img0, img1], 2).mean(1, keepdim=True).mean(2, keepdim=True).mean(3, keepdim=True)
-        img0 = img0 - mean_
-        img1 = img1 - mean_
+    dataset_val = Vimeo90K_Test_Dataset(dataset_dir= "C:\\Users\\enric\\Monash\\Y3S2\\model\\vimeo90k-firsthalf\\vimeo_triplet")
+    dataloader_val = DataLoader(dataset_val, batch_size=16, num_workers=16, pin_memory=True, shuffle=False, drop_last=True)
 
-        img0_ = resize(img0, scale_factor=scale_factor)
-        img1_ = resize(img1, scale_factor=scale_factor)
+    data = next(iter(dataloader_val))
 
-        f0_1, f0_2, f0_3, f0_4 = self.encoder(img0_)
-        f1_1, f1_2, f1_3, f1_4 = self.encoder(img1_)
+    print(len(data))
 
-        out4 = self.decoder4(f0_4, f1_4, embt)
-        up_flow0_4 = out4[:, 0:2]
-        up_flow1_4 = out4[:, 2:4]
-        ft_3_ = out4[:, 4:]
+    for i in range(len(data)):
+        data[i] = data[i].to(device)
 
-        out3 = self.decoder3(ft_3_, f0_3, f1_3, up_flow0_4, up_flow1_4)
-        up_flow0_3 = out3[:, 0:2] + 2.0 * resize(up_flow0_4, scale_factor=2.0)
-        up_flow1_3 = out3[:, 2:4] + 2.0 * resize(up_flow1_4, scale_factor=2.0)
-        ft_2_ = out3[:, 4:]
+    img0, imgt, img1, flow, embt = data
 
-        out2 = self.decoder2(ft_2_, f0_2, f1_2, up_flow0_3, up_flow1_3)
-        up_flow0_2 = out2[:, 0:2] + 2.0 * resize(up_flow0_3, scale_factor=2.0)
-        up_flow1_2 = out2[:, 2:4] + 2.0 * resize(up_flow1_3, scale_factor=2.0)
-        ft_1_ = out2[:, 4:]
-
-        out1 = self.decoder1(ft_1_, f0_1, f1_1, up_flow0_2, up_flow1_2)
-        up_flow0_1 = out1[:, 0:2] + 2.0 * resize(up_flow0_2, scale_factor=2.0)
-        up_flow1_1 = out1[:, 2:4] + 2.0 * resize(up_flow1_2, scale_factor=2.0)
-        up_mask_1 = torch.sigmoid(out1[:, 4:5])
-        up_res_1 = out1[:, 5:]
-
-        up_flow0_1 = resize(up_flow0_1, scale_factor=(1.0/scale_factor)) * (1.0/scale_factor)
-        up_flow1_1 = resize(up_flow1_1, scale_factor=(1.0/scale_factor)) * (1.0/scale_factor)
-        up_mask_1 = resize(up_mask_1, scale_factor=(1.0/scale_factor))
-        up_res_1 = resize(up_res_1, scale_factor=(1.0/scale_factor))
-
-        img0_warp = warp(img0, up_flow0_1)
-        img1_warp = warp(img1, up_flow1_1)
-        imgt_merge = up_mask_1 * img0_warp + (1 - up_mask_1) * img1_warp + mean_
-        imgt_pred = imgt_merge + up_res_1
-        imgt_pred = torch.clamp(imgt_pred, 0, 1)
-        return imgt_pred
-
-
+    summary(model, input_data = (img0, img1, embt, imgt, flow))
 
 
 # class ResBlock(nn.Module):
