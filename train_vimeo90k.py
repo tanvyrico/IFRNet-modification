@@ -182,7 +182,7 @@ if __name__ == '__main__':
     elif args.model_name == 'IFRNet_L':
         from models.IFRNet_L import Model
     elif args.model_name == 'IFRNet_S':
-        from models.IFRNet_S import Model
+        from models.IFRNet_S_remove import Model
 
     args.log_path = args.log_path + '/' + args.model_name
     args.num_workers = args.batch_size

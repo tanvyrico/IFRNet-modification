@@ -4,8 +4,9 @@ import torch
 # from models.IFRNet_S_ori import Model
 from models.IFRNet_S import Model
 from utils import read
-from imageio import mimsave
+from imageio import mimsave, imwrite
 import time
+
 
 
 model = Model().cuda().eval()
@@ -14,8 +15,8 @@ model = Model().cuda().eval()
 # model.load_state_dict(torch.load('./checkpoints/IFRNet_small/IFRNet_S_Vimeo90k.pth'))
 
 
-img0_np = read('./figures/img0.png')
-img1_np = read('./figures/img1.png')
+img0_np = read('./output_images/frame_0001.jpg')
+img1_np = read('./output_images/frame_0003.jpg')
 
 img0 = (torch.tensor(img0_np.transpose(2, 0, 1)).float() / 255.0).unsqueeze(0).cuda()
 img1 = (torch.tensor(img1_np.transpose(2, 0, 1)).float() / 255.0).unsqueeze(0).cuda()
@@ -32,3 +33,4 @@ imgt_pred_np = (imgt_pred[0].data.permute(1, 2, 0).cpu().numpy() * 255.0).astype
 
 images = [img0_np, imgt_pred_np, img1_np]
 mimsave('./figures/out_2x.gif', images, fps=3)
+imwrite('./figures/interpolated_frame.jpg', imgt_pred_np)

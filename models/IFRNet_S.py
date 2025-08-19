@@ -12,16 +12,10 @@ def resize(x, scale_factor):
     return F.interpolate(x, scale_factor=scale_factor, mode="bilinear", align_corners=False)
 
 
-
-
-
-
 def convrelu(in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, bias=True):
     return nn.Sequential(
-        # Depthwise convolution
         nn.Conv2d(in_channels, in_channels, kernel_size, stride, padding,
                   dilation=dilation, groups=in_channels, bias=bias),
-        # Pointwise convolution
         nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=bias),
         nn.PReLU(out_channels)
     )
@@ -35,102 +29,38 @@ def depthwise_separable_conv(channels, bias = True):
     )
 
 
-
-# def depthwise_separable_conv(in_channels, out_channels, bias=True):
-#     return nn.Sequential(
-#         # Depthwise convolution: groups = in_channels
-#         nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1, 
-#                   groups=in_channels, bias=bias),
-#         nn.PReLU(in_channels),
-#         # Pointwise convolution: 1x1 conv to mix channels
-#         nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0, bias=bias),
-#         nn.PReLU(out_channels)
-#     )
-
-
-# class ResBlock(nn.Module):
-#     def __init__(self, in_channels, side_channels, bias=True, bottleneck_ratio=0.5):
-#         super(ResBlock, self).__init__()
-#         self.side_channels = side_channels
-
-
-#         self.conv1 = depthwise_separable_conv(in_channels, bias)
-
-#         # self.conv1 = nn.Sequential(
-#         #     nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=bias), 
-#         #     nn.PReLU(in_channels)
-#         # )
-
-#         self.conv2 = depthwise_separable_conv(side_channels, bias)
-
-#         # self.conv2 = nn.Sequential(
-#         #     nn.Conv2d(side_channels, side_channels, kernel_size=3, stride=1, padding=1, bias=bias), 
-#         #     nn.PReLU(side_channels)
-#         # )
-
-#         self.conv3 = depthwise_separable_conv(in_channels, bias)
-
-
-#         # self.conv3 = nn.Sequential(
-#         #     nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=bias), 
-#         #     nn.PReLU(in_channels)
-#         # )
-
-#         self.conv4 = depthwise_separable_conv(side_channels, bias)
-
-#         # self.conv4 = nn.Sequential(
-#         #     nn.Conv2d(side_channels, side_channels, kernel_size=3, stride=1, padding=1, bias=bias), 
-#         #     nn.PReLU(side_channels)
-#         # )
-
-#         self.conv5 =  nn.Sequential ( 
-#             nn.Conv2d(in_channels, in_channels, kernel_size = 3, stride = 1, padding = 1, groups = in_channels, bias = bias ),
-#             nn.Conv2d(in_channels,in_channels, kernel_size = 1, stride = 1, padding = 0, bias = bias)
-#             )
-
-#         # self.conv5 = nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=bias)
-#         self.prelu = nn.PReLU(in_channels)
-
-#     def forward(self, x):
-#         out = self.conv1(x)
-#         out[:, -self.side_channels:, :, :] = self.conv2(out[:, -self.side_channels:, :, :].clone())
-#         out = self.conv3(out)
-#         out[:, -self.side_channels:, :, :] = self.conv4(out[:, -self.side_channels:, :, :].clone())
-#         out = self.prelu(x + self.conv5(out))
-#         return out
-
-
-
 class ResBlock(nn.Module):
     def __init__(self, in_channels, side_channels, bias=True, bottleneck_ratio=0.5):
         super(ResBlock, self).__init__()
         self.side_channels = side_channels
 
- 
+        # Full feature map convs
         self.conv1 = depthwise_separable_conv(in_channels, bias)
         self.conv2 = depthwise_separable_conv(side_channels, bias)
         self.conv3 = depthwise_separable_conv(in_channels, bias)
-        self.conv4 = depthwise_separable_conv(side_channels, bias)
 
         # Final bottlenecked depthwise separable conv
+        bottleneck_channels = max(1, int(in_channels * bottleneck_ratio))
         self.conv5 = nn.Sequential(
-            nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1,
-                      groups=in_channels, bias=bias),
-            nn.Conv2d(in_channels, in_channels, kernel_size=1, stride=1, padding=0, bias=bias)
+            nn.Conv2d(in_channels, bottleneck_channels, kernel_size=1, stride=1, 
+                      padding=0, bias=bias),  # reduce channels
+            nn.Conv2d(bottleneck_channels, bottleneck_channels, kernel_size=3, stride=1, 
+                      padding=1, groups=bottleneck_channels, bias=bias),  # depthwise
+            nn.Conv2d(bottleneck_channels, in_channels, kernel_size=1, stride=1, 
+                      padding=0, bias=bias)   # restore channels
         )
 
         self.prelu = nn.PReLU(in_channels)
 
-
     def forward(self, x):
         out = self.conv1(x)
+
         out[:, -self.side_channels:, :, :] = self.conv2(
             out[:, -self.side_channels:, :, :].clone()
         )
+
         out = self.conv3(out)
-        out[:, -self.side_channels:, :, :] = self.conv4(
-            out[:, -self.side_channels:, :, :].clone()
-        )
+
         out = self.prelu(x + self.conv5(out))
         return out
 
@@ -170,7 +100,6 @@ class Decoder4(nn.Module):
             convrelu(72+1, 72), 
             ResBlock(72, 12),
             nn.ConvTranspose2d(2*36, 27 + 4, 4, 2, 1)
-            # nn.ConvTranspose2d(144, 58, 4, 2, 1, bias=True)
         )
         
     def forward(self, f0, f1, embt):
@@ -186,10 +115,8 @@ class Decoder3(nn.Module):
         super(Decoder3, self).__init__()
         self.convblock = nn.Sequential(
             convrelu(85, 81),
-            # convrelu(166, 162), 
             ResBlock(81, 12), 
             nn.ConvTranspose2d(81, 22, 4, 2, 1, bias=True)
-            # nn.ConvTranspose2d(162, 40, 4, 2, 1, bias=True)
         )
 
     def forward(self, ft_, f0, f1, up_flow0, up_flow1):
@@ -204,11 +131,8 @@ class Decoder2(nn.Module):
     def __init__(self):
         super(Decoder2, self).__init__()
         self.convblock = nn.Sequential(
-            # convrelu(112, 108), 
             convrelu(58, 54),
-            # ResBlock(108, 24),
             ResBlock(54, 12), 
-            # nn.ConvTranspose2d(108, 28, 4, 2, 1, bias=True)
             nn.ConvTranspose2d(54, 16, 4, 2, 1, bias=True)
         )
 
@@ -224,11 +148,8 @@ class Decoder1(nn.Module):
     def __init__(self):
         super(Decoder1, self).__init__()
         self.convblock = nn.Sequential(
-            # convrelu(76, 72),
             convrelu(40, 36),  
-            # ResBlock(72, 24),
             ResBlock(36, 12), 
-            # nn.ConvTranspose2d(72, 8, 4, 2, 1, bias=True)
             nn.ConvTranspose2d(36, 8, 4, 2, 1, bias=True)
         )
         
@@ -350,35 +271,3 @@ class Model(nn.Module):
         return imgt_pred
 
 
-
-
-# class ResBlock(nn.Module):
-#     def __init__(self, in_channels, side_channels, bias=True):
-#         super(ResBlock, self).__init__()
-#         self.side_channels = side_channels
-#         self.conv1 = nn.Sequential(
-#             nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=bias), 
-#             nn.PReLU(in_channels)
-#         )
-#         self.conv2 = nn.Sequential(
-#             nn.Conv2d(side_channels, side_channels, kernel_size=3, stride=1, padding=1, bias=bias), 
-#             nn.PReLU(side_channels)
-#         )
-#         self.conv3 = nn.Sequential(
-#             nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=bias), 
-#             nn.PReLU(in_channels)
-#         )
-#         self.conv4 = nn.Sequential(
-#             nn.Conv2d(side_channels, side_channels, kernel_size=3, stride=1, padding=1, bias=bias), 
-#             nn.PReLU(side_channels)
-#         )
-#         self.conv5 = nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=bias)
-#         self.prelu = nn.PReLU(in_channels)
-
-#     def forward(self, x):
-#         out = self.conv1(x)
-#         out[:, -self.side_channels:, :, :] = self.conv2(out[:, -self.side_channels:, :, :].clone())
-#         out = self.conv3(out)
-#         out[:, -self.side_channels:, :, :] = self.conv4(out[:, -self.side_channels:, :, :].clone())
-#         out = self.prelu(x + self.conv5(out))
-#         return out
