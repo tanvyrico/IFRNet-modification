@@ -71,6 +71,31 @@ class ResBlock(nn.Module):
         return out
 
 
+# class Encoder(nn.Module):
+#     def __init__(self):
+#         super(Encoder, self).__init__()
+#         self.pyramid1 = nn.Sequential(
+#             convrelu(3, 12, 3, 2, 1), 
+#             convrelu(12, 12, 3, 1, 1)
+#         )
+#         self.pyramid2 = nn.Sequential(
+#             convrelu(12, 24, 3, 2, 1), 
+#             convrelu(24, 24, 3, 1, 1)
+#         )
+
+#         self.pyramid4 = nn.Sequential(
+#             convrelu(24, 36, 3, 2, 1), 
+#             convrelu(36, 36, 3, 1, 1)
+#         )
+        
+#     def forward(self, img):
+#         f1 = self.pyramid1(img)
+#         f2 = self.pyramid2(f1)
+
+#         f4 = self.pyramid4(f2)
+#         return f1, f2, f4
+
+
 class Encoder(nn.Module):
     def __init__(self):
         super(Encoder, self).__init__()
