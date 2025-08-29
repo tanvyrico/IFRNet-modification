@@ -5,94 +5,108 @@ import cv2
 import torch
 from torch.utils.data import Dataset
 from utils import read
-from collections import defaultdict
 
 
-def random_resize(img0, imgt, img1,dic ,p=0.1):
+def random_resize(img0, imgt, img1, flow, dic,p=0.1):
     if random.uniform(0, 1) < p:
         img0 = cv2.resize(img0, dsize=None, fx=2.0, fy=2.0, interpolation=cv2.INTER_LINEAR)
         imgt = cv2.resize(imgt, dsize=None, fx=2.0, fy=2.0, interpolation=cv2.INTER_LINEAR)
         img1 = cv2.resize(img1, dsize=None, fx=2.0, fy=2.0, interpolation=cv2.INTER_LINEAR)
+        flow = cv2.resize(flow, dsize=None, fx=2.0, fy=2.0, interpolation=cv2.INTER_LINEAR) * 2.0
         dic["random_resize"] = True
     else :
         dic["random_resize"] = False
-    return img0, imgt, img1
+        
+    return img0, imgt, img1, flow
 
 
-def random_crop(img0, imgt, img1, crop_x_y,crop_size=(224, 224)):
+def random_crop(img0, imgt, img1, flow, dic,xy ,crop_size=(224, 224)):
     h, w = crop_size[0], crop_size[1]
     ih, iw, _ = img0.shape
     x = np.random.randint(0, ih-h+1)
     y = np.random.randint(0, iw-w+1)
-    crop_x_y[0] = x
-    crop_x_y[1] = y
+    xy[0] = x
+    xy[1] = y
     img0 = img0[x:x+h, y:y+w, :]
     imgt = imgt[x:x+h, y:y+w, :]
     img1 = img1[x:x+h, y:y+w, :]
-    return img0, imgt, img1
+    flow = flow[x:x+h, y:y+w, :]
+    return img0, imgt, img1, flow
 
 
-def random_reverse_channel(img0, imgt, img1 ,p=0.5):
+def random_reverse_channel(img0, imgt, img1, flow,dic ,p=0.5):
     if random.uniform(0, 1) < p:
         img0 = img0[:, :, ::-1]
         imgt = imgt[:, :, ::-1]
         img1 = img1[:, :, ::-1]
+        dic["random_reverse_channel"] = True 
+    else :
+        dic["random_reverse_channel"] = False
         
-    return img0, imgt, img1
+    return img0, imgt, img1, flow
 
-def random_vertical_flip(img0, imgt, img1, dic ,p=0.3):
+
+def random_vertical_flip(img0, imgt, img1, flow, dic,p=0.3):
     if random.uniform(0, 1) < p:
         img0 = img0[::-1]
         imgt = imgt[::-1]
         img1 = img1[::-1]
+        flow = flow[::-1]
+        flow = np.concatenate((flow[:, :, 0:1], -flow[:, :, 1:2], flow[:, :, 2:3], -flow[:, :, 3:4]), 2)
         dic["random_vertical_flip"] = True
     else :
         dic["random_vertical_flip"] = False
-    return img0, imgt, img1
+      
+    return img0, imgt, img1, flow
 
 
-def random_horizontal_flip(img0, imgt, img1,dic , p=0.5):
+def random_horizontal_flip(img0, imgt, img1, flow,dic ,p=0.5):
     if random.uniform(0, 1) < p:
         img0 = img0[:, ::-1]
         imgt = imgt[:, ::-1]
         img1 = img1[:, ::-1]
+        flow = flow[:, ::-1]
+        flow = np.concatenate((-flow[:, :, 0:1], flow[:, :, 1:2], -flow[:, :, 2:3], flow[:, :, 3:4]), 2)
         dic["random_horizontal_flip"] = True
     else :
         dic["random_horizontal_flip"] = False
-    return img0, imgt, img1
+    return img0, imgt, img1, flow
 
 
-def random_rotate(img0, imgt, img1,dic ,p=0.05):
+def random_rotate(img0, imgt, img1, flow,dic ,p=0.05):
     if random.uniform(0, 1) < p:
         img0 = img0.transpose((1, 0, 2))
         imgt = imgt.transpose((1, 0, 2))
         img1 = img1.transpose((1, 0, 2))
+        flow = flow.transpose((1, 0, 2))
+        flow = np.concatenate((flow[:, :, 1:2], flow[:, :, 0:1], flow[:, :, 3:4], flow[:, :, 2:3]), 2)
         dic["random_rotate"] = True
     else :
         dic["random_rotate"] = False
-    return img0, imgt, img1
+    return img0, imgt, img1, flow
 
 
-def random_reverse_time(img0, imgt, img1,dic ,p=0.5):
+def random_reverse_time(img0, imgt, img1, flow,dic ,p=0.5):
     if random.uniform(0, 1) < p:
         tmp = img1
         img1 = img0
         img0 = tmp
+        flow = np.concatenate((flow[:, :, 2:4], flow[:, :, 0:2]), 2)
         dic["random_reverse_time"] = True
     else :
         dic["random_reverse_time"] = False
-    return img0, imgt, img1
+    return img0, imgt, img1, flow
 
 
-class Vimeo90K_Train_Dataset_No_Flow(Dataset):
+class Vimeo90K_Train_Dataset(Dataset):
     def __init__(self, dataset_dir='/home/ltkong/Datasets/Vimeo90K/vimeo_triplet', augment=True):
         self.dataset_dir = dataset_dir
         self.augment = augment
         self.img0_list = []
         self.imgt_list = []
         self.img1_list = []
-        # self.flow_t0_list = []
-        # self.flow_t1_list = []
+        self.flow_t0_list = []
+        self.flow_t1_list = []
         with open(os.path.join(dataset_dir, 'tri_trainlist.txt'), 'r') as f:
             for i in f:
                 name = str(i).strip()
@@ -101,47 +115,50 @@ class Vimeo90K_Train_Dataset_No_Flow(Dataset):
                 self.img0_list.append(os.path.join(dataset_dir, 'sequences', name, 'im1.png'))
                 self.imgt_list.append(os.path.join(dataset_dir, 'sequences', name, 'im2.png'))
                 self.img1_list.append(os.path.join(dataset_dir, 'sequences', name, 'im3.png'))
-                # self.flow_t0_list.append(os.path.join(dataset_dir, 'flow', name, 'flow_t0.flo'))
-                # self.flow_t1_list.append(os.path.join(dataset_dir, 'flow', name, 'flow_t1.flo'))
+                self.flow_t0_list.append(os.path.join(dataset_dir, 'flow', name, 'flow_t0.flo'))
+                self.flow_t1_list.append(os.path.join(dataset_dir, 'flow', name, 'flow_t1.flo'))
 
     def __len__(self):
         return len(self.imgt_list)
-
 
     def __getitem__(self, idx):
         img0 = read(self.img0_list[idx])
         imgt = read(self.imgt_list[idx])
         img1 = read(self.img1_list[idx])
-        dic = defaultdict(bool)
+        flow_t0 = read(self.flow_t0_list[idx])
+        flow_t1 = read(self.flow_t1_list[idx])
+        flow_ori = np.concatenate((flow_t0, flow_t1), 2).astype(np.float64)
+        flow = np.concatenate((flow_t0, flow_t1), 2).astype(np.float64)
+        dic = {}
         crop_x_y = [0,0]
 
-        aug0 = img0.copy()
-        augt = imgt.copy()
-        aug1 = img1.copy()
-
         if self.augment == True:
-            aug0, augt, aug1 = random_resize(aug0, augt, aug1,dic ,p=0.1)
-            aug0, augt, aug1 = random_crop(aug0, augt, aug1,crop_x_y ,crop_size=(224, 224))
-            aug0, augt, aug1 = random_reverse_channel(aug0, augt, aug1, p=0.5)
-            aug0, augt, aug1 = random_vertical_flip(aug0, augt, aug1,dic ,p=0.3)
-            aug0, augt, aug1 = random_horizontal_flip(aug0, augt, aug1,dic ,p=0.5)
-            aug0, augt, aug1 = random_rotate(aug0, augt, aug1,dic ,p=0.05)
-            aug0, augt, aug1 = random_reverse_time(aug0, augt, aug1, dic,p=0.5)
+            img0, imgt, img1, flow = random_resize(img0, imgt, img1, flow, dic,p=1)
+            img0, imgt, img1, flow = random_crop(img0, imgt, img1, flow,dic,crop_x_y ,crop_size=(224, 224))
+            img0, imgt, img1, flow = random_reverse_channel(img0, imgt, img1, flow,dic ,p=1)
+            img0, imgt, img1, flow = random_vertical_flip(img0, imgt, img1, flow, dic,p=1)
+            img0, imgt, img1, flow = random_horizontal_flip(img0, imgt, img1, flow,dic ,p=1)
+            img0, imgt, img1, flow = random_rotate(img0, imgt, img1, flow, dic,p=1)
+            img0, imgt, img1, flow = random_reverse_time(img0, imgt, img1, flow, dic,p=1)
 
-        aug0 = torch.from_numpy(aug0.transpose((2, 0, 1)).astype(np.float32) / 255.0)
-        augt = torch.from_numpy(augt.transpose((2, 0, 1)).astype(np.float32) / 255.0)
-        aug1 = torch.from_numpy(aug1.transpose((2, 0, 1)).astype(np.float32) / 255.0)
+        img0 = torch.from_numpy(img0.transpose((2, 0, 1)).astype(np.float32) / 255.0)
+        imgt = torch.from_numpy(imgt.transpose((2, 0, 1)).astype(np.float32) / 255.0)
+        img1 = torch.from_numpy(img1.transpose((2, 0, 1)).astype(np.float32) / 255.0)
+        flow = torch.from_numpy(flow.transpose((2, 0, 1)).astype(np.float32))
+        
         embt = torch.from_numpy(np.array(1/2).reshape(1, 1, 1).astype(np.float32))
+            
+        return img0, imgt, img1, flow, embt, dic, crop_x_y
 
-        return img0,imgt,img1, aug0, augt, aug1, embt,dic, crop_x_y
 
-
-class Vimeo90K_Test_Dataset_No_Flow(Dataset):
+class Vimeo90K_Test_Dataset(Dataset):
     def __init__(self, dataset_dir='/home/ltkong/Datasets/Vimeo90K/vimeo_triplet'):
         self.dataset_dir = dataset_dir
         self.img0_list = []
         self.imgt_list = []
         self.img1_list = []
+        self.flow_t0_list = []
+        self.flow_t1_list = []
         with open(os.path.join(dataset_dir, 'tri_testlist.txt'), 'r') as f:
             for i in f:
                 name = str(i).strip()
@@ -150,23 +167,28 @@ class Vimeo90K_Test_Dataset_No_Flow(Dataset):
                 self.img0_list.append(os.path.join(dataset_dir, 'sequences', name, 'im1.png'))
                 self.imgt_list.append(os.path.join(dataset_dir, 'sequences', name, 'im2.png'))
                 self.img1_list.append(os.path.join(dataset_dir, 'sequences', name, 'im3.png'))
+                self.flow_t0_list.append(os.path.join(dataset_dir, 'flow', name, 'flow_t0.flo'))
+                self.flow_t1_list.append(os.path.join(dataset_dir, 'flow', name, 'flow_t1.flo'))
 
     def __len__(self):
         return len(self.imgt_list)
 
     def __getitem__(self, idx):
-        img0_ori = read(self.img0_list[idx])
-        imgt_ori = read(self.imgt_list[idx])
-        img1_ori = read(self.img1_list[idx])
+        img0 = read(self.img0_list[idx])
+        imgt = read(self.imgt_list[idx])
+        img1 = read(self.img1_list[idx])
+        flow_t0 = read(self.flow_t0_list[idx])
+        flow_t1 = read(self.flow_t1_list[idx])
+        flow = np.concatenate((flow_t0, flow_t1), 2)
 
-
-        img0 = torch.from_numpy(img0_ori.copy().transpose((2, 0, 1)).astype(np.float32) / 255.0)
-        imgt = torch.from_numpy(imgt_ori.copy().transpose((2, 0, 1)).astype(np.float32) / 255.0)
-        img1 = torch.from_numpy(img1_ori.copy().transpose((2, 0, 1)).astype(np.float32) / 255.0)
-
+        img0 = torch.from_numpy(img0.transpose((2, 0, 1)).astype(np.float32) / 255.0)
+        imgt = torch.from_numpy(imgt.transpose((2, 0, 1)).astype(np.float32) / 255.0)
+        img1 = torch.from_numpy(img1.transpose((2, 0, 1)).astype(np.float32) / 255.0)
+        flow = torch.from_numpy(flow.transpose((2, 0, 1)).astype(np.float32))
         embt = torch.from_numpy(np.array(1/2).reshape(1, 1, 1).astype(np.float32))
         
-        return img0_ori, imgt_ori, img1_ori, img0,imgt,img1 ,embt
+        return img0, imgt, img1, flow, embt
+
 
 
 def random_resize_8x(img0, img1, img2, img3, img4, img5, img6, img7, img8, p=0.1):

@@ -230,6 +230,7 @@ class Model(nn.Module):
         loss_rec = self.l1_loss(imgt_pred - imgt) + self.tr_loss(imgt_pred, imgt)
         loss_geo = 0.01 * (self.gc_loss(ft_1_, ft_1) + self.gc_loss(ft_2_, ft_2))
         # loss_geo = 0.01 * (self.gc_loss(ft_1_, ft_1) + self.gc_loss(ft_2_, ft_2) + self.gc_loss(ft_3_, ft_3))
+
         if flow is not None:
             robust_weight0 = get_robust_weight(up_flow0_1, flow[:, 0:2], beta=0.3)
             robust_weight1 = get_robust_weight(up_flow1_1, flow[:, 2:4], beta=0.3)
@@ -237,6 +238,7 @@ class Model(nn.Module):
             loss_dis += 0.01 * (self.rb_loss(4.0 * resize(up_flow0_4, 4.0) - flow[:, 0:2], weight=robust_weight0) + self.rb_loss(4.0 * resize(up_flow1_4, 4.0) - flow[:, 2:4], weight=robust_weight1))
         else:
             loss_dis = 0.00 * loss_geo
+        
 
         return imgt_pred, loss_rec, loss_geo, loss_dis
 

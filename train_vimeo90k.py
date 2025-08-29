@@ -93,6 +93,10 @@ def train(args, model):
 
             imgt_pred, loss_rec, loss_geo, loss_dis = model(img0, img1, embt, imgt, flow)
 
+
+            print(loss_rec.requires_grad, loss_geo.requires_grad, loss_dis.requires_grad)
+            print(type(loss_rec), type(loss_geo), type(loss_dis))
+
             loss = loss_rec + loss_geo + loss_dis
             loss.backward()
             optimizer.step()
@@ -182,7 +186,7 @@ if __name__ == '__main__':
     elif args.model_name == 'IFRNet_L':
         from models.IFRNet_L import Model
     elif args.model_name == 'IFRNet_S':
-        from models.IFRNet_S_remove import Model
+        from models.IFRNet_refine_remove import Model
 
     args.log_path = args.log_path + '/' + args.model_name
     args.num_workers = args.batch_size

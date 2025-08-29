@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from utils import warp, get_robust_weight
 from loss import *
+from datasets import Vimeo90K_Train_Dataset
+from torch.utils.data import DataLoader
 
 
 def resize(x, scale_factor):
@@ -41,10 +43,20 @@ class ResBlock(nn.Module):
 
     def forward(self, x):
         out = self.conv1(x)
+        print(f'first out : {out.shape}')
+
         out[:, -self.side_channels:, :, :] = self.conv2(out[:, -self.side_channels:, :, :].clone())
+        print(f'second out : {out.shape}')
         out = self.conv3(out)
+        print(f'third out : {out.shape}')
         out[:, -self.side_channels:, :, :] = self.conv4(out[:, -self.side_channels:, :, :].clone())
+        print(f'fourth out : {out.shape}')
+
+
         out = self.prelu(x + self.conv5(out))
+        print(f'fifth out : {out.shape}')
+
+
         return out
 
 
@@ -91,6 +103,9 @@ class Decoder4(nn.Module):
         b, c, h, w = f0.shape
         embt = embt.repeat(1, 1, h, w)
         f_in = torch.cat([f0, f1, embt], 1)
+        print(f'f0 shape :{f0.shape}')
+        print(f'f1 shape :{f1.shape}')
+        print(f'f in shape: {f_in.shape}')
         f_out = self.convblock(f_in)
         return f_out
 
@@ -264,13 +279,12 @@ class Model(nn.Module):
 if __name__ == '__main__':
     device = torch.device('cuda')
 
-    model = ResBlock(144, 24).to(device)
 
     model = Model().to(device)
 
 
     dataset_val = Vimeo90K_Train_Dataset(dataset_dir= "C:\\Users\\enric\\Monash\\Y3S2\\model\\vimeo90k-firsthalf\\vimeo_triplet")
-    dataloader_val = DataLoader(dataset_val, batch_size=16, num_workers=16, pin_memory=True, shuffle=False, drop_last=True)
+    dataloader_val = DataLoader(dataset_val, batch_size=1, num_workers=1, pin_memory=True, shuffle=False, drop_last=True)
 
     data = next(iter(dataloader_val))
 

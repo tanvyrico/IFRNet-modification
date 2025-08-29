@@ -18,7 +18,7 @@ except:
 
 assert(int(str('').join(torch.__version__.split('.')[0:2])) >= 13) # requires at least pytorch version 1.3.0
 
-torch.set_grad_enabled(False) # make sure to not compute gradients for computational performance
+#torch.set_grad_enabled(False) # make sure to not compute gradients for computational performance
 
 torch.backends.cudnn.enabled = True # make sure to use cudnn for computational performance
 
@@ -333,6 +333,39 @@ class Network(torch.nn.Module):
 netNetwork = None
 
 ##########################################################
+
+
+def estimate_batch(tenOne, tenTwo):
+    global netNetwork
+
+    if netNetwork is None:
+        netNetwork = Network().cuda().eval()
+
+    # convert [B, H, W, 3] -> [B, 3, H, W]
+    if tenOne.shape[-1] == 3:
+        tenOne = tenOne.permute(0, 3, 1, 2).contiguous()
+        tenTwo = tenTwo.permute(0, 3, 1, 2).contiguous()
+
+    B, C, H, W = tenOne.shape
+
+    tenOne = tenOne.float().cuda() / 255.0
+    tenTwo = tenTwo.float().cuda() /255.0
+
+    W_pre = int(math.ceil(W / 32.0) * 32)
+    H_pre = int(math.ceil(H / 32.0) * 32)
+
+    tenOne_pre = torch.nn.functional.interpolate(tenOne, size=(H_pre, W_pre), mode='bilinear', align_corners=False)
+    tenTwo_pre = torch.nn.functional.interpolate(tenTwo, size=(H_pre, W_pre), mode='bilinear', align_corners=False)
+
+    tenFlow = netNetwork(tenOne_pre, tenTwo_pre)  # [B, 2, H_pre, W_pre]
+
+    tenFlow = torch.nn.functional.interpolate(tenFlow, size=(H, W), mode='bilinear', align_corners=False)
+
+    tenFlow[:, 0, :, :] *= float(W) / float(W_pre)
+    tenFlow[:, 1, :, :] *= float(H) / float(H_pre)
+
+    # return as [B, H, W, 2] instead of [B, 2, H, W]
+    return tenFlow.permute(0, 2, 3, 1).contiguous().cpu()
 
 def estimate(tenOne, tenTwo):
     global netNetwork

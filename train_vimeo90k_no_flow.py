@@ -11,18 +11,18 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from torchvision import models
 from torchinfo import summary
-from generate_flow import pred_flow
 
 
 # import torch.distributed as dist
 # from torch.utils.data.distributed import DistributedSampler
 # from torch.nn.parallel import DistributedDataParallel as DDP
 from datasets import Vimeo90K_Train_Dataset, Vimeo90K_Test_Dataset
-from datasets3 import random_resize, random_crop,random_vertical_flip, random_horizontal_flip,random_rotate,random_reverse_time
+from datasets_no_flow import Vimeo90K_Train_Dataset_No_Flow
+from liteflownet.run import estimate_batch,estimate
+from augment_flow_batch import get_flow
 from metric import calculate_psnr, calculate_ssim
 from utils import AverageMeter
 import logging
-
 
 def get_lr(args, iters):
     ratio = 0.5 * (1.0 + np.cos(iters / (args.epochs * args.iters_per_epoch) * math.pi))
@@ -59,9 +59,13 @@ def train(args, model):
         logger.addHandler(fhlr)
         logger.info(args)
 
-    dataset_train = Vimeo90K_Train_Dataset(dataset_dir= "C:\\Users\\enric\\Monash\\Y3S2\\model\\vimeo90k-test-and-train\\vimeo_triplet", augment=True)
+    
+    dataset_train= Vimeo90K_Train_Dataset_No_Flow(dataset_dir= "C:\\Users\\enric\\Monash\\Y3S2\\model\\vimeo90k-test-and-train\\vimeo_triplet", augment=True)
+
 
     dataloader_train = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.num_workers, pin_memory=True, drop_last=True)
+
+
     args.iters_per_epoch = dataloader_train.__len__()
     iters = args.resume_epoch * args.iters_per_epoch
     
@@ -79,37 +83,20 @@ def train(args, model):
     for epoch in range(args.resume_epoch, args.epochs):
         # sampler.set_epoch(epoch)
         data_iter = tqdm(enumerate(dataloader_train), total=len(dataloader_train), desc=f"Epoch {epoch+1}/{args.epochs}")
-        
+
         for i, data in data_iter:
-            for l in range(len(data)):
-                data[l] = data[l].to(args.device)
-            img0,imgt,img1, aug0, augt, aug1, embt,dic,crop_x_y = data
+            img0_ ,imgt_ ,img1_, aug0_, augt_, aug1_, embt_,dic_, crop_x_y_ = data
 
-            flow_t0 = pred_flow(imgt, img0)
-            flow_t1 = pred_flow(imgt, img1)
-            flow = np.concatenate((flow_t0, flow_t1), 2).astype(np.float64)
+            img0_  = img0_.to(args.device)
+            imgt_  = imgt_.to(args.device)
+            img1_ =  img1_.to(args.device)
+            aug0_ =  aug0_.to(args.device)
+            augt_ =  augt_.to(args.device)
+            aug1_ = aug1_.to(args.device)
+            embt_ = embt_.to(args.device)
 
-            if dic["random_resize"] :
-                flow = random_resize(flow)
-            
-            if dic["random_crop"] :
-                flow = random_crop(img0,flow,crop_x_y[0],crop_x_y[1])
-            
-            if dic["random_vertical_flip"]:
-                flow = random_vertical_flip(flow)
-            
-            if dic["random_horizontal_flip"]:
-                flow = random_horizontal_flip(flow)
-            
-            if dic["random_rotate"]:
-                flow = random_rotate(flow)
-            
-            if dic["random_reverse_time"]:
-                flow = random_reverse_time(flow)
-
-
-            flow = torch.from_numpy(flow.transpose((2, 0, 1)).astype(np.float32))
-            
+            with torch.no_grad():
+                flow_ = get_flow(img0_,imgt_,img1_,crop_x_y_,dic_).to(args.device)
 
             data_time_interval = time.time() - time_stamp
             time_stamp = time.time()
@@ -119,7 +106,7 @@ def train(args, model):
 
             optimizer.zero_grad()
 
-            imgt_pred, loss_rec, loss_geo, loss_dis = model(aug0, aug1, embt, augt, flow)
+            imgt_pred, loss_rec, loss_geo, loss_dis = model(aug0_, aug1_, embt_, augt_, flow_)
 
             loss = loss_rec + loss_geo + loss_dis
             loss.backward()
@@ -159,14 +146,7 @@ def evaluate(args, model, dataloader_val, epoch, logger):
     for i, data in enumerate(dataloader_val):
         for l in range(len(data)):
             data[l] = data[l].to(args.device)
-        img0, imgt, img1, embt = data
-
-        
-        flow_t0 = pred_flow(imgt, img0)
-        flow_t1 = pred_flow(imgt, img1)
-        flow = np.concatenate((flow_t0, flow_t1), 2).astype(np.float64)
-
-        flow = torch.from_numpy(flow.transpose((2, 0, 1)).astype(np.float32))
+        img0, imgt, img1, flow, embt = data
 
         with torch.no_grad():
             imgt_pred, loss_rec, loss_geo, loss_dis = model(img0, img1, embt, imgt, flow)
@@ -217,7 +197,7 @@ if __name__ == '__main__':
     elif args.model_name == 'IFRNet_L':
         from models.IFRNet_L import Model
     elif args.model_name == 'IFRNet_S':
-        from models.IFRNet_S_remove import Model
+        from models.IFRNet_refine_remove import Model
 
     args.log_path = args.log_path + '/' + args.model_name
     args.num_workers = args.batch_size
