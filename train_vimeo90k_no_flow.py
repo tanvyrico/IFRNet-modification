@@ -16,10 +16,10 @@ from torchinfo import summary
 # import torch.distributed as dist
 # from torch.utils.data.distributed import DistributedSampler
 # from torch.nn.parallel import DistributedDataParallel as DDP
-from datasets import Vimeo90K_Train_Dataset, Vimeo90K_Test_Dataset
-from datasets_no_flow import Vimeo90K_Train_Dataset_No_Flow
+# from datasets import Vimeo90K_Train_Dataset, Vimeo90K_Test_Dataset
+from datasets_no_flow import Vimeo90K_Train_Dataset_No_Flow,Vimeo90K_Test_Dataset_No_Flow
 from liteflownet.run import estimate_batch,estimate
-from augment_flow_batch import get_flow
+from augment_flow_batch import get_flow,get_flow_no_augment
 from metric import calculate_psnr, calculate_ssim
 from utils import AverageMeter
 import logging
@@ -69,7 +69,7 @@ def train(args, model):
     args.iters_per_epoch = dataloader_train.__len__()
     iters = args.resume_epoch * args.iters_per_epoch
     
-    dataset_val = Vimeo90K_Test_Dataset(dataset_dir= "C:\\Users\\enric\\Monash\\Y3S2\\model\\vimeo90k-test-and-train\\vimeo_triplet")
+    dataset_val = Vimeo90K_Test_Dataset_No_Flow(dataset_dir= "C:\\Users\\enric\\Monash\\Y3S2\\model\\vimeo90k-test-and-train\\vimeo_triplet")
     dataloader_val = DataLoader(dataset_val, batch_size=16, num_workers=16, pin_memory=True, shuffle=False, drop_last=True)
 
     optimizer = optim.AdamW(model.parameters(), lr=args.lr_start, weight_decay=0)
@@ -146,10 +146,15 @@ def evaluate(args, model, dataloader_val, epoch, logger):
     for i, data in enumerate(dataloader_val):
         for l in range(len(data)):
             data[l] = data[l].to(args.device)
-        img0, imgt, img1, flow, embt = data
+        img0_ori, imgt_ori, img1_ori, img0,imgt,img1 ,embt = data
+
+
+        with torch.no_grad():
+            flow = get_flow_no_augment(img0_ori,imgt_ori,img1_ori).to(args.device)
 
         with torch.no_grad():
             imgt_pred, loss_rec, loss_geo, loss_dis = model(img0, img1, embt, imgt, flow)
+
 
         loss_rec_list.append(loss_rec.cpu().numpy())
         loss_geo_list.append(loss_geo.cpu().numpy())

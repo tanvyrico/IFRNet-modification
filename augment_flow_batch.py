@@ -137,8 +137,17 @@ def pred_flow_batch(img1, img2):
 
     return flows
 
+def get_flow_no_augment(img0,imgt,img1):
+   
+  flow_t0 = estimate_batch(imgt,img0).numpy()
+  flow_t1 = estimate_batch(imgt,img1).numpy()
 
+  flow = np.concatenate((flow_t0, flow_t1), 3).astype(np.float64)
 
+  flow = torch.from_numpy(flow.transpose((0, 3, 1, 2)).astype(np.float32))
+
+  return flow
+   
 def get_flow(img0,imgt,img1,crop_x_y,dic):
     
   # flow_t0 = pred_flow_batch(imgt, img0)
