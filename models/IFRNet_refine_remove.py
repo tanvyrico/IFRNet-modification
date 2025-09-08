@@ -63,15 +63,12 @@ class ResBlock(nn.Module):
 
     def forward(self, x):
         out = self.conv1(x)
-
         # Side-channel refinement once (conv2)
         out[:, -self.side_channels:, :, :] = self.conv2(
             out[:, -self.side_channels:, :, :].clone()
         )
 
         out = self.conv3(out)
-
-        # conv4 dropped → keeps original channels for last side slice
 
         out = self.prelu(x + self.conv5(out))
         return out

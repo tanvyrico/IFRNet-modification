@@ -11,12 +11,13 @@ import time
 device =  "cuda"
 model = Model().to(device).eval() 
 
-# model.load_state_dict(torch.load('./checkpoint/IFRNet_S/2025-08-12_03-42-12/IFRNet_S_best.pth'))
+model.load_state_dict(torch.load(".\checkpoints_modification\IFRNet_refine_remove_epoch110\IFRNet_S_latest.pth"))
+
 
 i = 1
 
 source_path = './testing_data/input_frames'
-save_path = './testing_data/output_frames'
+save_path = './testing_data/output_frame_2'
 file_type = 'png'
 
 prev_img_np =  read(f'{source_path}/frame_{str(i).zfill(4)}.{file_type}')
