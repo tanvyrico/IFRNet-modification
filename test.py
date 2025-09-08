@@ -21,7 +21,7 @@ save_path = './testing_data/output_frame_2'
 file_type = 'png'
 
 prev_img_np =  read(f'{source_path}/frame_{str(i).zfill(4)}.{file_type}')
-# prev_img = (torch.tensor(prev_img_np.transpose(2, 0, 1)).float() / 255.0).unsqueeze(0)
+
 prev_img = (torch.tensor(prev_img_np.transpose(2, 0, 1)).float() / 255.0).unsqueeze(0).to(device)
 
 
